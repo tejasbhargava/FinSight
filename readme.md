@@ -338,7 +338,7 @@ POST /thesis/pdf
 ---
 
 ## Screenshots
-
+All Content couldnt be covered in the screenshots here are the main ones to get a preview of the project :)
 <details>
 <summary>📊 Research Assistant</summary>
 

@@ -1,9 +1,7 @@
 import streamlit as st
 import requests
+from datetime import datetime
 
-# ---------------------------
-# CONFIG
-# ---------------------------
 BASE_URL = "http://localhost:8000"
 
 st.set_page_config(
@@ -15,60 +13,122 @@ st.set_page_config(
 # ---------------------------
 # SESSION STATE
 # ---------------------------
+if "token" not in st.session_state:
+    st.session_state.token = None
+
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+if "active_session_id" not in st.session_state:
+    st.session_state.active_session_id = None
+
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
-if "latest_report" not in st.session_state:
-    st.session_state.latest_report = None
+if "sessions_list" not in st.session_state:
+    st.session_state.sessions_list = []
 
-if "latest_company" not in st.session_state:
-    st.session_state.latest_company = None
+if "page" not in st.session_state:
+    st.session_state.page = "Research Chat"
 
-if "last_comparison" not in st.session_state:
-    st.session_state.last_comparison = None
-
-if "last_query_answer" not in st.session_state:
-    st.session_state.last_query_answer = None
-
-if "last_ingest_result" not in st.session_state:
-    st.session_state.last_ingest_result = None
 
 # ---------------------------
-# API LAYER
+# API HELPERS
 # ---------------------------
-def query_company(company: str, question: str, chat_history: list) -> dict:
+def auth_headers():
+    return {"Authorization": f"Bearer {st.session_state.token}"}
+
+
+def login(email: str, password: str) -> bool:
+    try:
+        response = requests.post(
+            f"{BASE_URL}/auth/login",
+            data={"username": email, "password": password},  # form-encoded, not JSON
+            timeout=30
+        )
+        if response.status_code == 200:
+            st.session_state.token = response.json()["access_token"]
+            return True
+        else:
+            st.error("Invalid email or password.")
+            return False
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to backend.")
+        return False
+
+
+def register(username: str, email: str, password: str) -> bool:
+    try:
+        response = requests.post(
+            f"{BASE_URL}/auth/register",
+            json={"username": username, "email": email, "password": password},
+            timeout=30
+        )
+        if response.status_code == 200:
+            return True
+        else:
+            st.error(response.json().get("detail", "Registration failed."))
+            return False
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to backend.")
+        return False
+
+
+def fetch_sessions():
+    try:
+        response = requests.get(f"{BASE_URL}/sessions", headers=auth_headers(), timeout=30)
+        if response.status_code == 200:
+            st.session_state.sessions_list = response.json()
+        elif response.status_code == 401:
+            logout()
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to backend.")
+
+
+def load_session(session_id: int):
+    try:
+        response = requests.get(f"{BASE_URL}/sessions/{session_id}", headers=auth_headers(), timeout=30)
+        if response.status_code == 200:
+            data = response.json()
+            st.session_state.active_session_id = session_id
+            st.session_state.chat_history = data["messages"]
+    except requests.exceptions.ConnectionError:
+        st.error("Cannot connect to backend.")
+
+
+def send_query(company: str, question: str, session_id: int = None) -> dict:
     try:
         response = requests.post(
             f"{BASE_URL}/query",
-            json={
-                "company": company,
-                "question": question,
-                "chat_history": chat_history
-            },
-            timeout=60
+            json={"company": company, "question": question, "session_id": session_id},
+            headers=auth_headers(),
+            timeout=90
         )
+        if response.status_code == 401:
+            logout()
+            return None
         response.raise_for_status()
         return response.json()
     except requests.exceptions.Timeout:
-        st.error("Request timed out. The backend is taking too long.")
+        st.error("Request timed out.")
     except requests.exceptions.ConnectionError:
-        st.error("Cannot connect to backend. Make sure it is running on port 8000.")
+        st.error("Cannot connect to backend.")
     except requests.exceptions.HTTPError as e:
-        st.error(f"Backend error: {e.response.json().get('detail', str(e))}")
+        st.error(f"Error: {e.response.json().get('detail', str(e))}")
     return None
 
 
-def compare_companies(company1: str, company2: str, question: str) -> dict:
+def send_compare(company1: str, company2: str, question: str, session_id: int = None) -> dict:
     try:
         response = requests.post(
             f"{BASE_URL}/compare",
-            json={
-                "company1": company1,
-                "company2": company2,
-                "question": question
-            },
-            timeout=90
+            json={"company1": company1, "company2": company2, "question": question, "session_id": session_id},
+            headers=auth_headers(),
+            timeout=120
         )
+        if response.status_code == 401:
+            logout()
+            return None
         response.raise_for_status()
         return response.json()
     except requests.exceptions.Timeout:
@@ -76,20 +136,21 @@ def compare_companies(company1: str, company2: str, question: str) -> dict:
     except requests.exceptions.ConnectionError:
         st.error("Cannot connect to backend.")
     except requests.exceptions.HTTPError as e:
-        st.error(f"Backend error: {e.response.json().get('detail', str(e))}")
+        st.error(f"Error: {e.response.json().get('detail', str(e))}")
     return None
 
 
-def generate_thesis(company: str) -> dict:
+def send_thesis(company: str, session_id: int = None) -> dict:
     try:
         response = requests.post(
             f"{BASE_URL}/thesis",
-            json={
-                "company": company,
-                "chat_history": []
-            },
-            timeout=120
+            json={"company": company, "session_id": session_id},
+            headers=auth_headers(),
+            timeout=150
         )
+        if response.status_code == 401:
+            logout()
+            return None
         response.raise_for_status()
         return response.json()
     except requests.exceptions.Timeout:
@@ -97,130 +158,138 @@ def generate_thesis(company: str) -> dict:
     except requests.exceptions.ConnectionError:
         st.error("Cannot connect to backend.")
     except requests.exceptions.HTTPError as e:
-        st.error(f"Backend error: {e.response.json().get('detail', str(e))}")
+        st.error(f"Error: {e.response.json().get('detail', str(e))}")
     return None
 
 
-def generate_pdf(company: str, report: str) -> bytes:
-    try:
-        response = requests.post(
-            f"{BASE_URL}/thesis/pdf",
-            json={
-                "company": company,
-                "report": report
-            },
-            timeout=60
-        )
-        response.raise_for_status()
-        return response.content
-    except requests.exceptions.Timeout:
-        st.error("PDF generation timed out.")
-    except requests.exceptions.ConnectionError:
-        st.error("Cannot connect to backend.")
-    except requests.exceptions.HTTPError as e:
-        st.error(f"Backend error: {str(e)}")
-    return None
+def logout():
+    st.session_state.token = None
+    st.session_state.user = None
+    st.session_state.active_session_id = None
+    st.session_state.chat_history = []
+    st.session_state.sessions_list = []
+    st.rerun()
 
 
-def ingest_company(company: str, form_type: str) -> dict:
-    try:
-        response = requests.post(
-            f"{BASE_URL}/ingest",
-            json={"company": company, "form_type": form_type},
-            timeout=120
-        )
-        response.raise_for_status()
-        return response.json()
-    except requests.exceptions.Timeout:
-        st.error("Ingestion timed out. Large filings can take a while.")
-    except requests.exceptions.ConnectionError:
-        st.error("Cannot connect to backend.")
-    except requests.exceptions.HTTPError as e:
-        st.error(f"Backend error: {e.response.json().get('detail', str(e))}")
-    return None
+def new_chat():
+    st.session_state.active_session_id = None
+    st.session_state.chat_history = []
+
+
+# ---------------------------
+# AUTH SCREEN
+# ---------------------------
+def auth_screen():
+    st.markdown("## 📈 FinSight")
+    st.caption("AI-Powered Financial Research Assistant")
+    st.divider()
+
+    tab1, tab2 = st.tabs(["Login", "Register"])
+
+    with tab1:
+        email = st.text_input("Email", key="login_email")
+        password = st.text_input("Password", type="password", key="login_password")
+        if st.button("Login", use_container_width=True):
+            if not email or not password:
+                st.warning("Please enter both email and password.")
+            else:
+                with st.spinner("Logging in..."):
+                    if login(email, password):
+                        st.rerun()
+
+    with tab2:
+        username = st.text_input("Username", key="reg_username")
+        email_r = st.text_input("Email", key="reg_email")
+        password_r = st.text_input("Password", type="password", key="reg_password")
+        if st.button("Register", use_container_width=True):
+            if not username or not email_r or not password_r:
+                st.warning("Please fill all fields.")
+            else:
+                with st.spinner("Creating account..."):
+                    if register(username, email_r, password_r):
+                        st.success("Account created. Please log in.")
 
 
 # ---------------------------
 # SIDEBAR
 # ---------------------------
-with st.sidebar:
-    st.markdown("## 📈 FinSight")
-    st.caption("AI-Powered Financial Research Assistant")
-    st.divider()
+def sidebar():
+    with st.sidebar:
+        st.markdown("## 📈 FinSight")
+        st.caption("AI-Powered Financial Research Assistant")
+        st.divider()
 
-    page = st.radio(
-        "Navigate",
-        [
-            "🔍 Research Assistant",
-            "⚖️ Company Comparison",
-            "📝 Investment Thesis",
-            "📂 SEC Filing Ingestion",
-            "ℹ️ About"
-        ],
-        label_visibility="collapsed"
-    )
+        st.session_state.page = st.radio(
+            "Navigate",
+            ["Research Chat", "Compare Companies", "Investment Thesis"],
+            label_visibility="collapsed"
+        )
 
-    st.divider()
-    st.caption("Powered by SEC EDGAR · NewsAPI · Yahoo Finance")
+        if st.button("➕ New Chat", use_container_width=True):
+            new_chat()
+
+        st.divider()
+        st.markdown("**Conversation History**")
+
+        fetch_sessions()
+
+        if not st.session_state.sessions_list:
+            st.caption("No conversations yet.")
+        else:
+            for s in st.session_state.sessions_list:
+                label = s["title"] or s["company"] or "Untitled"
+                if st.button(label, key=f"session_{s['id']}", use_container_width=True):
+                    load_session(s["id"])
+                    st.rerun()
+
+        st.divider()
+        if st.button("🚪 Logout", use_container_width=True):
+            logout()
 
 
 # ---------------------------
-# PAGE 1: RESEARCH ASSISTANT
+# RESEARCH CHAT PAGE
 # ---------------------------
-if page == "🔍 Research Assistant":
-    st.title("🔍 Research Assistant")
-    st.caption("Ask anything about a company — powered by SEC filings, live stock data, and recent news.")
-    st.divider()
+def research_chat_page():
+    st.title("🔍 Research Chat")
 
-    company = st.text_input(
-        "Company",
-        placeholder="e.g. Apple, Microsoft, Nvidia",
-        key="research_company"
-    )
+    company = st.text_input("Company", placeholder="e.g. Apple, Microsoft, Nvidia")
 
-    # display chat history
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
+            if msg.get("tools_used"):
+                with st.expander("Tools Used"):
+                    for t in msg["tools_used"]:
+                        st.markdown(f"- `{t}`")
 
-    # question input
     question = st.chat_input("Ask a question about this company...")
 
     if question:
         if not company:
             st.warning("Please enter a company name first.")
         else:
-            # display user message
             with st.chat_message("user"):
                 st.markdown(question)
+            st.session_state.chat_history.append({"role": "user", "content": question, "tools_used": []})
 
-            # append to history
-            st.session_state.chat_history.append({
-                "role": "user",
-                "content": question
-            })
-
-            # call backend
             with st.chat_message("assistant"):
-                with st.spinner("Researching..."):
-                    result = query_company(
+                with st.spinner("Analyzing company..."):
+                    result = send_query(
                         company=company,
                         question=question,
-                        chat_history=st.session_state.chat_history
+                        session_id=st.session_state.active_session_id
                     )
 
                 if result:
-                    answer = result["answer"]
-                    st.markdown(answer)
-
-                    # persist
+                    st.markdown(result["answer"])
+                    st.session_state.active_session_id = result["session_id"]
                     st.session_state.chat_history.append({
                         "role": "assistant",
-                        "content": answer
+                        "content": result["answer"],
+                        "tools_used": result.get("tools_used", [])
                     })
-                    st.session_state.last_query_answer = answer
 
-                    # metadata
                     col1, col2 = st.columns(2)
                     with col1:
                         with st.expander("🛠️ Tools Used"):
@@ -231,21 +300,12 @@ if page == "🔍 Research Assistant":
                             for s in result.get("sources", []):
                                 st.markdown(f"- `{s}`")
 
-    # clear chat
-    if st.session_state.chat_history:
-        st.divider()
-        if st.button("🗑️ Clear Chat", use_container_width=False):
-            st.session_state.chat_history = []
-            st.rerun()
-
 
 # ---------------------------
-# PAGE 2: COMPANY COMPARISON
+# COMPARE PAGE
 # ---------------------------
-elif page == "⚖️ Company Comparison":
-    st.title("⚖️ Company Comparison")
-    st.caption("Compare two companies across financials, risks, and recent developments.")
-    st.divider()
+def compare_page():
+    st.title("⚖️ Compare Companies")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -253,180 +313,96 @@ elif page == "⚖️ Company Comparison":
     with col2:
         company2 = st.text_input("Company 2", placeholder="e.g. Microsoft")
 
-    question = st.text_input(
-        "Comparison Question",
-        value="Compare these two companies across financials, risks, and recent news.",
-        placeholder="What do you want to compare?"
-    )
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
 
-    if st.button("⚖️ Compare", use_container_width=True):
+    question = st.chat_input("Ask a comparison question...")
+
+    if question:
         if not company1 or not company2:
             st.warning("Please enter both company names.")
         else:
-            with st.spinner(f"Comparing {company1} and {company2}..."):
-                result = compare_companies(company1, company2, question)
+            with st.chat_message("user"):
+                st.markdown(question)
+            st.session_state.chat_history.append({"role": "user", "content": question, "tools_used": []})
 
-            if result:
-                st.session_state.last_comparison = result["comparison"]
+            with st.chat_message("assistant"):
+                with st.spinner("Comparing companies..."):
+                    result = send_compare(
+                        company1=company1,
+                        company2=company2,
+                        question=question,
+                        session_id=st.session_state.active_session_id
+                    )
 
-                st.divider()
-                st.subheader(f"{company1} vs {company2}")
-                st.markdown(result["comparison"])
+                if result:
+                    st.markdown(result["comparison"])
+                    st.session_state.active_session_id = result["session_id"]
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": result["comparison"],
+                        "tools_used": result.get("tools_used", [])
+                    })
 
-                col1, col2 = st.columns(2)
-                with col1:
                     with st.expander("🛠️ Tools Used"):
                         for t in result.get("tools_used", []):
                             st.markdown(f"- `{t}`")
-                with col2:
-                    with st.expander("📄 Sources"):
-                        for s in result.get("sources", []):
-                            st.markdown(f"- `{s}`")
-
-    # persist result across reruns
-    elif st.session_state.last_comparison:
-        st.divider()
-        st.subheader("Last Comparison")
-        st.markdown(st.session_state.last_comparison)
 
 
 # ---------------------------
-# PAGE 3: INVESTMENT THESIS
+# THESIS PAGE
 # ---------------------------
-elif page == "📝 Investment Thesis":
+def thesis_page():
     st.title("📝 Investment Thesis")
-    st.caption("Generate a full investment research report for any company.")
-    st.divider()
 
-    company = st.text_input(
-        "Company",
-        placeholder="e.g. Nvidia, Tesla, Amazon"
-    )
+    company = st.text_input("Company", placeholder="e.g. Nvidia, Tesla")
 
-    if st.button("📝 Generate Thesis", use_container_width=True):
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    if st.button("Generate Thesis", use_container_width=True):
         if not company:
             st.warning("Please enter a company name.")
         else:
-            with st.spinner(f"Generating investment thesis for {company}..."):
-                result = generate_thesis(company)
+            user_note = f"Generate investment thesis for {company}"
+            with st.chat_message("user"):
+                st.markdown(user_note)
+            st.session_state.chat_history.append({"role": "user", "content": user_note, "tools_used": []})
 
-            if result:
-                st.session_state.latest_report = result["report"]
-                st.session_state.latest_company = company
+            with st.chat_message("assistant"):
+                with st.spinner("Generating investment thesis..."):
+                    result = send_thesis(
+                        company=company,
+                        session_id=st.session_state.active_session_id
+                    )
 
-                st.divider()
-                st.subheader(f"Investment Thesis — {company}")
-                st.markdown(result["report"])
+                if result:
+                    st.markdown(result["report"])
+                    st.session_state.active_session_id = result["session_id"]
+                    st.session_state.chat_history.append({
+                        "role": "assistant",
+                        "content": result["report"],
+                        "tools_used": result.get("tools_used", [])
+                    })
 
-                col1, col2 = st.columns(2)
-                with col1:
                     with st.expander("🛠️ Tools Used"):
                         for t in result.get("tools_used", []):
                             st.markdown(f"- `{t}`")
-                with col2:
-                    with st.expander("📄 Sources"):
-                        for s in result.get("sources", []):
-                            st.markdown(f"- `{s}`")
-
-    # persist report across reruns
-    elif st.session_state.latest_report:
-        st.divider()
-        st.subheader(f"Investment Thesis — {st.session_state.latest_company}")
-        st.markdown(st.session_state.latest_report)
-
-    # PDF export — only show if report exists
-    if st.session_state.latest_report:
-        st.divider()
-        st.markdown("#### 📥 Export Report")
-
-        if st.button("Generate PDF", use_container_width=True):
-            with st.spinner("Generating PDF..."):
-                pdf_bytes = generate_pdf(
-                    company=st.session_state.latest_company,
-                    report=st.session_state.latest_report
-                )
-
-            if pdf_bytes:
-                st.download_button(
-                    label="⬇️ Download PDF",
-                    data=pdf_bytes,
-                    file_name=f"{st.session_state.latest_company}_Investment_Report.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
-                )
 
 
 # ---------------------------
-# PAGE 4: SEC FILING INGESTION
+# MAIN
 # ---------------------------
-elif page == "📂 SEC Filing Ingestion":
-    st.title("📂 SEC Filing Ingestion")
-    st.caption("Download and index a company's SEC filing for RAG retrieval.")
-    st.divider()
+if not st.session_state.token:
+    auth_screen()
+else:
+    sidebar()
 
-    company = st.text_input(
-        "Company",
-        placeholder="e.g. Apple, Microsoft, Tesla"
-    )
-
-    form_type = st.selectbox(
-        "Filing Type",
-        ["10-K", "10-Q", "8-K"]
-    )
-
-    if st.button("📂 Ingest Filing", use_container_width=True):
-        if not company:
-            st.warning("Please enter a company name.")
-        else:
-            with st.spinner(f"Ingesting {form_type} for {company}... this may take a minute."):
-                result = ingest_company(company, form_type)
-
-            if result:
-                st.session_state.last_ingest_result = result
-                st.success(f"Successfully ingested {form_type} for {company}")
-
-                col1, col2, col3 = st.columns(3)
-                col1.metric("Status", result.get("status", "—").capitalize())
-                col2.metric("Chunks Created", result.get("chunks", "—"))
-
-    # persist last result
-    elif st.session_state.last_ingest_result:
-        r = st.session_state.last_ingest_result
-        st.divider()
-        st.markdown("**Last Ingestion Result**")
-        col1, col2 = st.columns(2)
-        col1.metric("Status", r.get("status", "—").capitalize())
-        col2.metric("Chunks", r.get("chunks", "—"))
-
-
-# ---------------------------
-# PAGE 5: ABOUT
-# ---------------------------
-elif page == "ℹ️ About":
-    st.title("ℹ️ About FinSight")
-    st.caption("How it works under the hood.")
-    st.divider()
-
-    st.markdown("""
-FinSight is an AI-powered financial research assistant that combines multiple data sources
-and retrieval techniques to generate grounded, cited financial analysis.
-""")
-
-    st.divider()
-
-    components = {
-        "📥 SEC Filing Ingestion": "Downloads 10-K and 10-Q filings directly from SEC EDGAR using the public API. No authentication required. Filings are saved locally for processing.",
-        "✂️ Section-Aware Chunking": "Instead of blindly splitting documents by token count, FinSight splits SEC filings by their natural sections (Item 1, Item 1A, Item 7, etc.) before chunking. Every chunk carries metadata about which section it came from.",
-        "🔍 FAISS Vector Search": "Chunks are embedded using a sentence-transformer model and stored in a FAISS index on disk. Each company gets its own index, enabling fast similarity search at query time.",
-        "📐 MMR Retrieval": "At query time, FinSight uses Maximum Marginal Relevance (MMR) search instead of plain similarity search — balancing relevance with diversity so retrieved chunks don't all say the same thing.",
-        "📰 Financial News Analysis": "Recent news headlines and summaries are fetched from NewsAPI, giving the LLM awareness of current events, product launches, regulatory actions, and market sentiment.",
-        "📊 Stock Data Integration": "Live stock data is fetched from Yahoo Finance via yfinance — including price, PE ratio, market cap, EPS, 52-week range, revenue, and more.",
-        "📝 Investment Thesis Generation": "Combines all three data sources — filings, news, stock data — and prompts the LLM to generate a structured investment research report covering business overview, financials, risks, and outlook.",
-        "📄 PDF Export": "Generated reports can be exported as professionally formatted PDFs without re-running the LLM — the report is stored in session state and passed directly to the PDF generation endpoint.",
-        "⚡ FastAPI Backend": "All data fetching, RAG retrieval, and LLM orchestration runs in a FastAPI backend with clean endpoint separation and Pydantic request/response validation.",
-        "🖥️ Streamlit Frontend": "The frontend is built with Streamlit, using session state to persist conversation history, reports, and comparison results across reruns."
-    }
-
-    for title, description in components.items():
-        with st.expander(title):
-            st.markdown(description)
+    if st.session_state.page == "Research Chat":
+        research_chat_page()
+    elif st.session_state.page == "Compare Companies":
+        compare_page()
+    elif st.session_state.page == "Investment Thesis":
+        thesis_page()

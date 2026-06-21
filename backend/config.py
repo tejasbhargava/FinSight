@@ -15,6 +15,10 @@ class Settings(BaseSettings):
     FILINGS_PATH: str = "data/filings"
     INDEXES_PATH: str = "data/indexes"
 
+    DATABASE_URL: str
+
+    SECRET_KEY: str
+
     model_config = SettingsConfigDict(
         env_file=".env",
         extra="ignore"

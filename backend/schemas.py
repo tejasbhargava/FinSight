@@ -14,6 +14,7 @@ class QueryRequest(BaseModel):
     company: str
     question: str
     chat_history: List[Message] = []
+    session_id: int | None = None
 
 
 class CompareRequest(BaseModel):
@@ -21,18 +22,21 @@ class CompareRequest(BaseModel):
     company2: str
     question: str
     chat_history: List[Message] = []
+    session_id: int | None = None
 
 
 class QueryResponse(BaseModel):
     answer: str
     tools_used: List[str]
     sources: List[str] = Field(default_factory=list)
+    session_id: int
 
 
 class CompareResponse(BaseModel):
     comparison: str
     tools_used: List[str]
     sources: List[str] = Field(default_factory=list)
+    session_id: int
 
 
 class IngestResponse(BaseModel):
@@ -43,12 +47,14 @@ class IngestResponse(BaseModel):
 class ThesisRequest(BaseModel):
     company: str
     chat_history: List[Message] = []
+    session_id: int | None = None
 
 
 class ThesisResponse(BaseModel):
     report: str
     tools_used: List[str]
     sources: List[str]
+    session_id: int 
 
 class PDFRequest(BaseModel):
     company: str

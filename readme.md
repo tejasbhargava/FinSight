@@ -2,11 +2,24 @@
 
 **AI-Powered Financial Research Assistant**
 
-FinSight is an end-to-end financial research platform that combines SEC filings, market data, financial news, Retrieval-Augmented Generation (RAG), and Large Language Models to help users perform company research, compare businesses, and generate structured investment theses.
+FinSight is an end-to-end financial research platform that combines SEC filings, market data, financial news, Retrieval-Augmented Generation (RAG), and Large Language Models to help users perform company research, compare businesses, and generate structured investment theses — with full user authentication and persistent conversation history.
 
 ---
 
 ## Features
+
+### User Authentication
+
+Secure account system with:
+
+* JWT-based authentication
+* Bcrypt password hashing
+* Protected API endpoints
+* Per-user data isolation
+
+Every research session, comparison, and report is tied to an authenticated user.
+
+---
 
 ### Conversational Financial Research
 
@@ -18,7 +31,18 @@ Examples:
 * How does NVIDIA generate revenue?
 * What growth opportunities does Microsoft have?
 
-FinSight retrieves relevant information from SEC filings, financial news, and market data before generating grounded responses.
+FinSight retrieves relevant information from SEC filings, financial news, and market data before generating grounded responses. Conversations persist across sessions — ask a follow-up question days later and the assistant still has context.
+
+---
+
+### Persistent Conversation History
+
+All conversations are stored in PostgreSQL and organized into chat sessions, ChatGPT-style:
+
+* Every research query, comparison, and thesis generation creates or continues a session
+* Full message history (user + assistant turns) is saved with timestamps
+* Sessions can be reopened anytime — conversation history survives logout/login
+* Sidebar displays all past sessions for quick access
 
 ---
 
@@ -28,7 +52,7 @@ FinSight automatically:
 
 * Downloads SEC filings
 * Parses filing content
-* Chunks documents
+* Chunks documents by section (Item 1, Item 1A, Item 7, etc.)
 * Creates embeddings
 * Stores vectors in FAISS
 
@@ -45,10 +69,10 @@ Supported filing types:
 The system uses:
 
 * Section-aware document chunking
-* HuggingFace Embeddings
+* HuggingFace Embeddings (BAAI/bge-base-en-v1.5)
 * FAISS Vector Store
 * MMR Retrieval
-* Conversational Question Contextualization
+* Conversational Question Contextualization (standalone question rewriting using chat history)
 
 This allows the assistant to answer questions using relevant filing excerpts instead of relying solely on LLM knowledge.
 
@@ -91,6 +115,8 @@ Compare two companies side-by-side using:
 * SEC filing insights
 * Business strengths and weaknesses
 
+Comparisons are conversational — ask follow-up questions on the same comparison and the assistant retains context via session-based chat history.
+
 Example:
 
 Compare Apple and Microsoft's long-term growth opportunities.
@@ -113,11 +139,13 @@ Generate structured research reports including:
 * Long-Term Outlook
 * Conclusion
 
+Generated theses are automatically saved to the database and linked to the user's account.
+
 ---
 
 ### PDF Export
 
-Investment theses can be exported as professional PDF reports for later review and sharing.
+Investment theses can be exported as professional PDF reports for later review and sharing — without re-running the LLM or retrieval pipeline.
 
 ---
 
@@ -127,11 +155,15 @@ User
 
 ↓
 
-Streamlit Frontend
+Streamlit Frontend (Auth + Chat UI)
 
 ↓
 
-FastAPI Backend
+FastAPI Backend (JWT Protected)
+
+↓
+
+PostgreSQL ←→ Chat Sessions / Messages / Reports
 
 ↓
 
@@ -151,7 +183,7 @@ OpenRouter LLM
 
 ↓
 
-Final Response
+Final Response (saved + returned)
 
 ---
 
@@ -165,6 +197,16 @@ Final Response
 
 * FastAPI
 * Pydantic
+
+### Authentication
+
+* JWT (python-jose)
+* Bcrypt (passlib)
+
+### Database
+
+* PostgreSQL
+* SQLAlchemy
 
 ### LLM & AI
 
@@ -196,6 +238,16 @@ FinanceResearchAssistant/
 
 backend/
 │
+├── auth/
+│   ├── router.py
+│   ├── dependencies.py
+│   ├── schemas.py
+│   ├── utils.py
+│
+├── db/
+│   ├── database.py
+│   ├── models.py
+│
 ├── rag/
 │   ├── ingestor.py
 │   ├── retriever.py
@@ -216,6 +268,7 @@ backend/
 ├── schemas.py
 ├── llm.py
 ├── config.py
+├── create_tables.py
 │
 Frontend/
 │
@@ -223,6 +276,24 @@ Frontend/
 │
 requirements.txt
 README.md
+```
+
+---
+
+## Database Schema
+
+```text
+users
+├── id, username, email, password_hash, created_at
+
+chat_sessions
+├── id, user_id (FK), company, title, created_at
+
+messages
+├── id, session_id (FK), role, content, tools_used, created_at
+
+reports
+├── id, user_id (FK), company, report_type, content, created_at
 ```
 
 ---
@@ -247,10 +318,17 @@ Create a `.env` file:
 
 ```env
 OPENROUTER_API_KEY=your_key
-
 NEWS_API_KEY=your_key
-
 MODEL_NAME=your_model
+DATABASE_URL=postgresql://username:password@localhost:5432/finsight_db
+SECRET_KEY=your_random_secret_key
+```
+
+Create the database tables:
+
+```bash
+cd backend
+python create_tables.py
 ```
 
 ---
@@ -269,6 +347,8 @@ Swagger UI:
 http://localhost:8000/docs
 ```
 
+Use the **Authorize** button in Swagger to log in and test protected endpoints.
+
 ---
 
 ## Running the Frontend
@@ -282,6 +362,13 @@ streamlit run app.py
 ---
 
 ## API Endpoints
+
+### Authentication
+
+```http
+POST /auth/register
+POST /auth/login
+```
 
 ### Ingest SEC Filings
 
@@ -313,15 +400,24 @@ POST /thesis
 POST /thesis/pdf
 ```
 
+### Conversation History
+
+```http
+GET /sessions
+GET /sessions/{session_id}
+```
+
 ---
 
 ## Example Workflow
 
-1. Ingest Apple's latest 10-K.
-2. Ask questions about risks and strategy.
-3. Compare Apple and Microsoft.
-4. Generate an investment thesis.
-5. Export the report as a PDF.
+1. Register an account and log in.
+2. Ingest Apple's latest 10-K.
+3. Ask questions about risks and strategy — conversation is saved automatically.
+4. Compare Apple and Microsoft, with follow-up questions.
+5. Generate an investment thesis.
+6. Export the report as a PDF.
+7. Log out, log back in — all conversation history is still there.
 
 ---
 
@@ -330,7 +426,7 @@ POST /thesis/pdf
 * Multi-company portfolio analysis
 * Historical financial trend analysis
 * Advanced citation support
-* Persistent vector databases
+* Refresh token rotation
 * Docker deployment
 * Cloud deployment
 * Real-time market monitoring
@@ -339,6 +435,19 @@ POST /thesis/pdf
 
 ## Screenshots
 All Content couldnt be covered in the screenshots here are the main ones to get a preview of the project :)
+<details>
+<summary>🔐 Authentication</summary>
+
+<br>
+
+![Login](screenshots/login.png)
+
+<br>
+
+![Register](screenshots/register.png)
+
+</details>
+
 <details>
 <summary>📊 Research Assistant</summary>
 
@@ -380,25 +489,21 @@ All Content couldnt be covered in the screenshots here are the main ones to get 
 
 ![Thesis 2](screenshots/thesis_2.png)
 
-</details>
-
-<details>
-<summary>📂 SEC Filing Ingestion</summary>
-
 <br>
 
-![Ingestion](screenshots/ingestion.png)
+![Thesis 2](screenshots/thesis_3.png)
 
 </details>
 
 <details>
-<summary>ℹ️ About Page</summary>
+<summary>🗂️ Conversation History</summary>
 
 <br>
 
-![About](screenshots/about.png)
+![History](screenshots/history.png)
 
 </details>
+
 
 ## Disclaimer
 

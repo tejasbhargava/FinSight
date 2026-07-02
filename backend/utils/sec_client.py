@@ -65,7 +65,7 @@ def download_latest_filing(ticker: str, form_type: str = "10-K") -> str:
 def main():
 
     path = download_latest_filing(
-        ticker="AAPL",
+        ticker="NVDA",
         form_type="10-K"
     )
 

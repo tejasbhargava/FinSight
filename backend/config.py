@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     CHUNK_SIZE: int = 500
     CHUNK_OVERLAP: int = 50
-    TOP_K: int = 5
+    TOP_K: int = 8
 
     DATA_PATH: str = "data"
     FILINGS_PATH: str = "data/filings"

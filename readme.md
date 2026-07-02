@@ -504,6 +504,15 @@ All Content couldnt be covered in the screenshots here are the main ones to get 
 
 </details>
 
+<details>
+<summary>🗂️ Evaluation</summary>
+
+<br>
+
+![History](screenshots/eval_ss.png)
+
+</details>
+
 
 ## Disclaimer
 

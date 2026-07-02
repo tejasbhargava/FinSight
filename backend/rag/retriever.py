@@ -77,7 +77,7 @@ def retrieve_chunks(
     results = vectorstore.max_marginal_relevance_search(
         standalone_question,
         k=settings.TOP_K,
-        fetch_k=20
+        fetch_k=50
     )
 
     return [
@@ -92,8 +92,8 @@ def retrieve_chunks(
 def main():
 
     docs = retrieve_chunks(
-        ticker="AAPL",
-        question="What are Apple's biggest risks?",
+        ticker="JPM",
+        question="What are jp morgans biggest risks?",
         chat_history=[]
     )
 

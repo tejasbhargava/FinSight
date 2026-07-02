@@ -216,7 +216,7 @@ def ingest_filing(
 def main():
 
     total_chunks = ingest_filing(
-        ticker="AAPL",
+        ticker="COST",
         form_type="10-K"
     )
 
